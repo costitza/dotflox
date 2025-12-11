@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useAction } from "convex/react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,8 @@ export default function RepoDashboardPage() {
   const router = useRouter();
   const deleteRepo = useMutation(api.app.deleteRepoAndData);
   const runFullAnalysis = useAction(api.prAgent.runFullAnalysisWorkflow);
+  const startCallSession = useAction(api.calls.startCallSession);
+  const finishCallSession = useAction(api.calls.finishCallSession);
 
   const repo = useQuery(
     api.app.getRepo,
@@ -67,6 +69,15 @@ export default function RepoDashboardPage() {
   );
 
   const [selectedPrId, setSelectedPrId] = useState<string | null>(null);
+  const [isCallRecording, setIsCallRecording] = useState(false);
+  const [activeCallId, setActiveCallId] = useState<Id<"calls"> | null>(null);
+  const [callError, setCallError] = useState<string | null>(null);
+  const [selectedCallId, setSelectedCallId] = useState<Id<"calls"> | null>(
+    null
+  );
+
+  const callRecorderRef = useRef<MediaRecorder | null>(null);
+  const callChunksRef = useRef<Blob[]>([]);
 
   const latestAnalysisByPrId = useMemo(() => {
     const map = new Map<string, any>();
@@ -89,6 +100,30 @@ export default function RepoDashboardPage() {
   const contributors = contributorsDetailed ?? [];
   const sessions = analysisSessions ?? [];
   const callSessions = calls ?? [];
+
+  // Map latest call-analysis session per call id.
+  const callAnalysisByCallId = useMemo(() => {
+    const map = new Map<string, any>();
+    (sessions ?? []).forEach((s: any) => {
+      const cfg = (s.config as any) ?? {};
+      if (s.sessionType === "call" && cfg.kind === "call" && cfg.callId) {
+        const key = String(cfg.callId);
+        const current = map.get(key);
+        if (
+          !current ||
+          (s.updatedAt ?? s.createdAt) > (current.updatedAt ?? current.createdAt)
+        ) {
+          map.set(key, s);
+        }
+      }
+    });
+    return map;
+  }, [sessions]);
+
+  const selectedCallActionItems = useQuery(
+    api.app.listCallActionItems,
+    selectedCallId ? { callId: selectedCallId } : ("skip" as any)
+  );
 
   const latestSnapshotSession = useMemo(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -134,6 +169,99 @@ export default function RepoDashboardPage() {
     if (latest.status === "running") return "Running…";
     if (latest.status === "failed") return "Failed";
     return "Pending";
+  }
+
+  async function handleCallButtonClick() {
+    if (isCallRecording) {
+      const recorder = callRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.stop();
+      }
+      setIsCallRecording(false);
+      return;
+    }
+
+    try {
+      setCallError(null);
+      const { callId } = await startCallSession({ repoId });
+      setActiveCallId(callId as Id<"calls">);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(err);
+      setCallError("Unable to start a new call session.");
+      return;
+    }
+
+    navigator.mediaDevices
+      ?.getUserMedia({ audio: true })
+      .then((stream) => {
+        const recorder = new MediaRecorder(stream);
+        callRecorderRef.current = recorder;
+        callChunksRef.current = [];
+
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            callChunksRef.current.push(event.data);
+          }
+        };
+
+        recorder.onstop = () => {
+          stream.getTracks().forEach((track) => track.stop());
+          const blob = new Blob(callChunksRef.current, { type: "audio/webm" });
+          void transcribeAndFinishCall(blob);
+        };
+
+        recorder.start();
+        setIsCallRecording(true);
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error(err);
+        setCallError(
+          "Unable to access microphone. Check browser permissions and try again."
+        );
+      });
+  }
+
+  async function transcribeAndFinishCall(blob: Blob) {
+    if (!activeCallId) return;
+
+    try {
+      const formData = new FormData();
+      formData.set("audio", blob);
+
+      const listenRes = await fetch("/api/listen", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!listenRes.ok) {
+        throw new Error("Failed to transcribe call audio.");
+      }
+
+      const listenData = (await listenRes.json()) as { text?: string };
+      const transcript = listenData.text?.trim();
+
+      if (!transcript) {
+        throw new Error("Transcription did not return any text.");
+      }
+
+      await finishCallSession({
+        repoId,
+        callId: activeCallId,
+        transcript,
+      });
+
+      setActiveCallId(null);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(err);
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Something went wrong processing this call.";
+      setCallError(message);
+    }
   }
 
   return (
@@ -493,7 +621,7 @@ export default function RepoDashboardPage() {
                 )}
                 <div className="space-y-2">
                   {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                  {sessions.map((session: any) => (
+                {sessions.map((session: any) => (
                     <div
                       key={session._id}
                       className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2"
@@ -506,7 +634,9 @@ export default function RepoDashboardPage() {
                               ? "Manual snapshot"
                               : session.sessionType === "full_repo"
                                 ? "Full repo analysis"
-                                : "Analysis"}
+                                : session.sessionType === "call"
+                                  ? "Call analysis"
+                                  : "Analysis"}
                         </p>
                         <p className="text-[11px] text-slate-500">
                           {session.summary ??
@@ -556,8 +686,12 @@ export default function RepoDashboardPage() {
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
                 <div className="flex items-center gap-2 text-xs text-slate-600">
-                  <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                  <span>Idle</span>
+                  <span
+                    className={`inline-flex h-2 w-2 rounded-full ${
+                      isCallRecording ? "bg-amber-500" : "bg-emerald-500"
+                    }`}
+                  />
+                  <span>{isCallRecording ? "Recording…" : "Idle"}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
@@ -565,14 +699,17 @@ export default function RepoDashboardPage() {
                     className="h-7 rounded-full bg-[#2563eb] px-3 text-[11px] font-semibold text-white hover:bg-[#1d4ed8]"
                     type="button"
                     onClick={() => {
-                      // eslint-disable-next-line no-alert
-                      alert("Call recording not implemented yet.");
+                      void handleCallButtonClick();
                     }}
                   >
-                    Start call
+                    {isCallRecording ? "Stop & analyze" : "Start call"}
                   </Button>
                 </div>
               </div>
+
+              {callError && (
+                <p className="text-[11px] font-medium text-rose-600">{callError}</p>
+              )}
 
               {callSessions.length === 0 && (
                 <p className="text-xs text-slate-500">
@@ -582,46 +719,66 @@ export default function RepoDashboardPage() {
 
               <div className="space-y-2">
                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                {callSessions.map((call: any) => (
-                  <div
+                {callSessions.map((call: any) => {
+                  const analysis = callAnalysisByCallId.get(String(call._id));
+                  const isAnalyzed = analysis?.status === "completed";
+                  const analysisLabel = !analysis
+                    ? "Not analyzed"
+                    : analysis.status === "completed"
+                      ? "Analyzed"
+                      : "Analyzing…";
+                  return (
+                  <button
                     key={call._id}
-                    className="rounded-xl border border-slate-100 bg-slate-50/60 p-3"
+                    type="button"
+                    onClick={() => {
+                      if (isAnalyzed) {
+                        setSelectedCallId(call._id);
+                      }
+                    }}
+                    className="w-full text-left disabled:cursor-default disabled:opacity-60"
+                    disabled={!isAnalyzed}
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs font-medium text-slate-900">
-                        {new Date(call.startTime).toLocaleString()}
-                      </p>
-                      <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                          call.status === "completed"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : call.status === "running"
-                              ? "bg-amber-50 text-amber-700"
-                              : "bg-rose-50 text-rose-700"
-                        }`}
-                      >
-                        {call.status}
-                      </span>
-                    </div>
-                    {call.shortSummary && (
-                      <p className="mt-1 text-[11px] text-slate-600">
-                        {call.shortSummary}
-                      </p>
-                    )}
-                    {call.tags?.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {call.tags.map((tag: string) => (
-                          <span
-                            key={tag}
-                            className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600"
-                          >
-                            {tag}
-                          </span>
-                        ))}
+                    <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-medium text-slate-900">
+                          {new Date(call.startTime).toLocaleString()}
+                        </p>
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                            call.status === "completed"
+                              ? "bg-emerald-50 text-emerald-700"
+                              : call.status === "running"
+                                ? "bg-amber-50 text-amber-700"
+                                : "bg-rose-50 text-rose-700"
+                          }`}
+                        >
+                          {call.status}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {call.shortSummary && (
+                        <p className="mt-1 text-[11px] text-slate-600">
+                          {call.shortSummary}
+                        </p>
+                      )}
+                      <p className="mt-0.5 text-[10px] text-slate-500">
+                        {analysisLabel}
+                      </p>
+                      {call.tags?.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {call.tags.map((tag: string) => (
+                            <span
+                              key={tag}
+                              className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );})}
               </div>
             </CardContent>
           </Card>
@@ -726,6 +883,123 @@ export default function RepoDashboardPage() {
           </div>
         </div>
       )}
+      {selectedCallId && (() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const call = callSessions.find((c: any) => c._id === selectedCallId);
+        if (!call) return null;
+        const items = selectedCallActionItems ?? [];
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+            <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                    Call details
+                  </p>
+                  <h2 className="text-sm font-semibold text-slate-900">
+                    {new Date(call.startTime).toLocaleString()}
+                  </h2>
+                  {call.durationSeconds && (
+                    <p className="text-[11px] text-slate-500">
+                      Duration: {Math.round(call.durationSeconds / 60)} min
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      call.status === "completed"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : call.status === "running"
+                          ? "bg-amber-50 text-amber-700"
+                          : "bg-rose-50 text-rose-700"
+                    }`}
+                  >
+                    {call.status}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 rounded-full px-3 text-[11px]"
+                    type="button"
+                    onClick={() => setSelectedCallId(null)}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs text-slate-700">
+                {call.shortSummary && (
+                  <div>
+                    <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                      Summary
+                    </p>
+                    <p className="whitespace-pre-line text-xs">
+                      {call.shortSummary}
+                    </p>
+                  </div>
+                )}
+
+                {call.tags?.length > 0 && (
+                  <div>
+                    <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                      Tags
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {call.tags.map((tag: string) => (
+                        <span
+                          key={tag}
+                          className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {items.length > 0 && (
+                  <div>
+                    <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                      Action items
+                    </p>
+                    <ul className="space-y-1">
+                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                      {items.map((item: any) => (
+                        <li
+                          key={item._id}
+                          className="flex items-start justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-1.5"
+                        >
+                          <div className="flex-1">
+                            <p className="text-xs text-slate-800">
+                              {item.description}
+                            </p>
+                            {item.filePath && (
+                              <p className="mt-0.5 text-[10px] text-slate-500">
+                                {item.filePath}
+                              </p>
+                            )}
+                          </div>
+                          <span
+                            className={`mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                              item.status === "open"
+                                ? "bg-amber-50 text-amber-700"
+                                : "bg-emerald-50 text-emerald-700"
+                            }`}
+                          >
+                            {item.status === "open" ? "Open" : "Done"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

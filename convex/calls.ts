@@ -37,6 +37,19 @@ export const startCallSession = action({
       tags: [],
     });
 
+    // Create an analysis session representing the call-analysis workflow.
+    await ctx.runMutation(api.app.createAnalysisSession, {
+      repoId,
+      userId,
+      sessionType: "call",
+      status: "running",
+      config: {
+        kind: "call",
+        callId: String(callId),
+      },
+      summary: "Call analysis",
+    });
+
     return { callId };
   },
 });
@@ -111,6 +124,27 @@ export const finishCallSession = action({
       endTime: now,
       durationSeconds,
     });
+
+    // Mark the corresponding call analysis session as completed.
+    const sessions = await ctx.runQuery(api.app.listAnalysisSessionsForRepo, {
+      repoId,
+    });
+    const callSession = (sessions as any[]).find((s: any) => {
+      const cfg = (s.config as any) ?? {};
+      return (
+        s.sessionType === "call" &&
+        cfg.kind === "call" &&
+        cfg.callId === String(callId)
+      );
+    });
+    if (callSession) {
+      await ctx.runMutation(api.app.updateAnalysisSessionStatus, {
+        analysisSessionId: callSession._id,
+        status: "completed",
+        startedAt: call?.startTime ?? undefined,
+        completedAt: now,
+      });
+    }
 
     const updated = await ctx.runQuery(api.app.getCall, { callId });
 

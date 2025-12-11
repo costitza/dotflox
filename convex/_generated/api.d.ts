@@ -15,6 +15,7 @@ import type * as agents_PRAnalyzer from "../agents/PRAnalyzer.js";
 import type * as agents_RepoAssistant from "../agents/RepoAssistant.js";
 import type * as agents_RepoSnapshotAgent from "../agents/RepoSnapshotAgent.js";
 import type * as app from "../app.js";
+import type * as calls from "../calls.js";
 import type * as crons from "../crons.js";
 import type * as github from "../github.js";
 import type * as prAgent from "../prAgent.js";
@@ -35,6 +36,7 @@ declare const fullApi: ApiFromModules<{
   "agents/RepoAssistant": typeof agents_RepoAssistant;
   "agents/RepoSnapshotAgent": typeof agents_RepoSnapshotAgent;
   app: typeof app;
+  calls: typeof calls;
   crons: typeof crons;
   github: typeof github;
   prAgent: typeof prAgent;
