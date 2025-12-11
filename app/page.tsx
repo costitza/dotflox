@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
@@ -10,6 +11,12 @@ import {
   Users,
   AudioLines,
 } from "lucide-react";
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  UserButton,
+} from "@clerk/nextjs";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -54,15 +61,29 @@ export default function LandingPage() {
 
           {/* Auth actions */}
           <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              className="hidden h-9 px-4 text-sm font-medium text-slate-600 hover:bg-slate-100 md:inline-flex"
-            >
-              Sign In
-            </Button>
-            <Button className="h-9 rounded-full bg-[#2563eb] px-4 text-sm font-semibold text-white shadow-sm shadow-blue-500/30 hover:bg-[#1d4ed8]">
-              Get Started
-            </Button>
+            <SignedOut>
+              <SignInButton mode="modal">
+                <Button
+                  variant="ghost"
+                  className="hidden h-9 px-4 text-sm font-medium text-slate-600 hover:bg-slate-100 md:inline-flex"
+                >
+                  Sign In
+                </Button>
+              </SignInButton>
+              <SignInButton mode="modal">
+                <Button className="h-9 rounded-full bg-[#2563eb] px-4 text-sm font-semibold text-white shadow-sm shadow-blue-500/30 hover:bg-[#1d4ed8]">
+                  Get Started
+                </Button>
+              </SignInButton>
+            </SignedOut>
+            <SignedIn>
+              <Link href="/dashboard">
+                <Button className="h-9 rounded-full bg-[#2563eb] px-4 text-sm font-semibold text-white shadow-sm shadow-blue-500/30 hover:bg-[#1d4ed8]">
+                  Go to Dashboard
+                </Button>
+              </Link>
+              <UserButton afterSignOutUrl="/" />
+            </SignedIn>
           </div>
         </nav>
       </header>
@@ -96,10 +117,23 @@ export default function LandingPage() {
               </p>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <Button className="h-11 rounded-full bg-[#2563eb] px-6 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 hover:bg-[#1d4ed8]">
-                  Analyze My Repo
-                  <ArrowRight className="ml-1.5 size-4" />
-                </Button>
+                <SignedOut>
+                  <SignInButton mode="modal">
+                    <Button className="h-11 rounded-full bg-[#2563eb] px-6 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 hover:bg-[#1d4ed8]">
+                      Analyze My Repo
+                      <ArrowRight className="ml-1.5 size-4" />
+                    </Button>
+                  </SignInButton>
+                </SignedOut>
+                <SignedIn>
+                  <Link href="/dashboard">
+                    <Button className="h-11 rounded-full bg-[#2563eb] px-6 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 hover:bg-[#1d4ed8]">
+                      Analyze My Repo
+                      <ArrowRight className="ml-1.5 size-4" />
+                    </Button>
+                  </Link>
+                </SignedIn>
+
                 <Button
                   variant="outline"
                   className="h-11 rounded-full border-[#2563eb] bg-white px-6 text-sm font-semibold text-[#2563eb] hover:bg-blue-50"
