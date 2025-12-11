@@ -400,35 +400,41 @@ export const upsertRepoContributor = mutation({
       )
     ),
     mainAreas: v.optional(v.array(v.string())),
+    profileSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
 
+    const { repoId, contributorId, role, seniority, mainAreas, profileSummary } =
+      args;
+
     const existing = await ctx.db
       .query("repoContributors")
       .withIndex("byRepoAndContributor", (q) =>
-        q.eq("repoId", args.repoId).eq("contributorId", args.contributorId)
+        q.eq("repoId", repoId).eq("contributorId", contributorId)
       )
       .unique();
 
     if (existing) {
       await ctx.db.patch(existing._id, {
-        role: args.role,
-        seniority: args.seniority,
-        mainAreas: args.mainAreas ?? existing.mainAreas,
+        role,
+        seniority,
+        mainAreas: mainAreas ?? existing.mainAreas,
+        profileSummary: profileSummary ?? existing.profileSummary,
         updatedAt: now,
       });
       return existing._id;
     }
 
     return ctx.db.insert("repoContributors", {
-      repoId: args.repoId,
-      contributorId: args.contributorId,
-      role: args.role,
-      seniority: args.seniority,
+      repoId,
+      contributorId,
+      role,
+      seniority,
       prCount: 0,
       linesChanged: 0,
-      mainAreas: args.mainAreas,
+      mainAreas,
+      profileSummary,
       createdAt: now,
       updatedAt: now,
     });
@@ -676,6 +682,21 @@ export const updateAnalysisSessionStatus = mutation({
       status,
       startedAt,
       completedAt,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const updateAnalysisSessionSummaryAndConfig = mutation({
+  args: {
+    analysisSessionId: v.id("analysisSessions"),
+    summary: v.optional(v.string()),
+    config: v.optional(v.any()),
+  },
+  handler: async (ctx, { analysisSessionId, summary, config }) => {
+    await ctx.db.patch(analysisSessionId, {
+      summary,
+      config,
       updatedAt: Date.now(),
     });
   },

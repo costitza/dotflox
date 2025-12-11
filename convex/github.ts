@@ -330,12 +330,12 @@ export const syncRepoPullRequestsFromGithub = action({
     }
 
     if (changed) {
-      // Kick off a repo-level analysis workflow for updated PRs.
-      await ctx.scheduler.runAfter(
-        0,
-        api.prAgent.runRepoAnalysisWorkflow,
-        { repoId }
-      );
+      // Kick off the full analysis workflow for updated PRs, which
+      // includes PR analysis, contributor profiling, repo snapshot,
+      // and history synthesis.
+      await ctx.scheduler.runAfter(0, api.prAgent.runFullAnalysisWorkflow, {
+        repoId,
+      });
     }
   },
 });

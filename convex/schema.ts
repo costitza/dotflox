@@ -73,6 +73,9 @@ export default defineSchema({
     prCount: v.number(),
     linesChanged: v.number(),
     mainAreas: v.optional(v.array(v.string())),
+    // Optional natural language summary of this contributor's role
+    // in the context of this repo (set by the Contributor Profiler agent).
+    profileSummary: v.optional(v.string()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
