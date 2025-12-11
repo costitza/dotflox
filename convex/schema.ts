@@ -23,6 +23,10 @@ export default defineSchema({
     url: v.string(),
     defaultBranch: v.string(),
 
+    // Optional per-repo GitHub access token used for
+    // background syncs and analysis.
+    githubAccessToken: v.optional(v.string()),
+
     createdAt: v.number(),
     updatedAt: v.number(),
   })

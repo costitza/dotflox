@@ -109,6 +109,8 @@ export const upsertRepo = mutation({
         description: args.description ?? existing.description,
         url: args.url,
         defaultBranch: args.defaultBranch,
+        // Keep any existing GitHub access token; this helper is
+        // for general repo metadata updates, not auth changes.
         updatedAt: now,
       });
       return existing._id;
@@ -116,6 +118,7 @@ export const upsertRepo = mutation({
 
     return ctx.db.insert("repos", {
       ...args,
+      githubAccessToken: undefined,
       createdAt: now,
       updatedAt: now,
     });
