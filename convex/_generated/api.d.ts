@@ -9,10 +9,12 @@
  */
 
 import type * as agents_PRAnalyzer from "../agents/PRAnalyzer.js";
+import type * as agents_RepoAssistant from "../agents/RepoAssistant.js";
 import type * as app from "../app.js";
 import type * as crons from "../crons.js";
 import type * as github from "../github.js";
 import type * as prAgent from "../prAgent.js";
+import type * as repoAssistant from "../repoAssistant.js";
 import type * as repos from "../repos.js";
 
 import type {
@@ -23,10 +25,12 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   "agents/PRAnalyzer": typeof agents_PRAnalyzer;
+  "agents/RepoAssistant": typeof agents_RepoAssistant;
   app: typeof app;
   crons: typeof crons;
   github: typeof github;
   prAgent: typeof prAgent;
+  repoAssistant: typeof repoAssistant;
   repos: typeof repos;
 }>;
 

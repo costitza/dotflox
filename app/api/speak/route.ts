@@ -21,9 +21,12 @@ export async function POST(req: Request) {
     text,
   });
 
-  // `audio` is a binary payload from the AI SDK; cast to `BodyInit`
-  // so we can return it as the response body.
-  return new Response(audio as unknown as BodyInit, {
+  // Convert the GeneratedAudioFile into a Blob so Next can send
+  // a single, complete audio response rather than a hanging stream.
+  const arrayBuffer = audio.uint8Array.buffer as ArrayBuffer;
+  const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
+
+  return new Response(blob, {
     status: 200,
     headers: {
       "Content-Type": "audio/mpeg",
