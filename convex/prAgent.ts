@@ -4,6 +4,9 @@ import { paginationOptsValidator } from "convex/server";
 import { createThread, listUIMessages } from "@convex-dev/agent";
 import { api, components } from "./_generated/api";
 import { prAnalyzerAgent } from "./agents/PRAnalyzer";
+import { contributorProfilerAgent } from "./agents/ContributorProfiler";
+import { repoSnapshotAgent } from "./agents/RepoSnapshotAgent";
+import { historySynthesisAgent } from "./agents/HistorySynthesizer";
 import { syncPullRequestArgs, type SyncPullRequestArgs } from "./github";
 
 /**
@@ -299,9 +302,8 @@ export const runRepoAnalysisWorkflow = action({
 
       const result = await prAnalyzerAgent.generateText(
         ctx,
-        // Use the repo owner as the Agent "userId" to satisfy context requirements
-        // and override tools with none; we just want pure analysis.
-        { userId: repo.ownerUserId.id ?? String(repo.ownerUserId), tools: {} },
+        // Use the repo owner as the Agent \"userId\" to satisfy context requirements.
+        { userId: String(repo.ownerUserId) },
         { prompt }
       );
 
@@ -337,6 +339,301 @@ export const runRepoAnalysisWorkflow = action({
       startedAt: Date.now(),
       completedAt: Date.now(),
     });
+  },
+});
+
+/**
+ * ContributorProfileRefreshWorkflow
+ *
+ * For a single repo, iterate over all repoContributors and invoke the
+ * Contributor Profiler agent once per contributor. The agent receives a
+ * JSON summary of their PRs and impacted paths, and calls the
+ * `saveRepoContributorProfile` tool to persist role/seniority/areas.
+ */
+export const runContributorProfileRefreshWorkflow = action({
+  args: { repoId: v.id("repos") },
+  handler: async (ctx, { repoId }) => {
+    const repo = await ctx.runQuery(api.app.getRepo, { repoId });
+    if (!repo) return;
+
+    const [linksDetailed, pullRequests, prAnalyses] = await Promise.all([
+      ctx.runQuery(api.app.listRepoContributorsDetailed, { repoId }),
+      ctx.runQuery(api.app.listPullRequestsForRepo, { repoId }),
+      ctx.runQuery(api.app.listPrAnalysesForRepo, { repoId }),
+    ]);
+
+    // Build latest analysis per PR id for quick lookup.
+    const latestAnalysisByPrId = new Map<
+      string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      any
+    >();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (prAnalyses as any[]).forEach((a: any) => {
+      const key = a.pullRequestId;
+      const current = latestAnalysisByPrId.get(key);
+      if (
+        !current ||
+        (a.updatedAt ?? a.createdAt) > (current.updatedAt ?? current.createdAt)
+      ) {
+        latestAnalysisByPrId.set(key, a);
+      }
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const item of linksDetailed as any[]) {
+      const contributor = item.contributor;
+      const link = item.repoContributor;
+      if (!contributor || !link) continue;
+
+      // PRs authored by this contributor in this repo.
+      const authoredPrs = (pullRequests as any[]).filter(
+        (pr: any) => pr.authorContributorId === contributor._id
+      );
+
+      const prSummaries = authoredPrs.map((pr: any) => {
+        const analysis = latestAnalysisByPrId.get(pr._id);
+        return {
+          prNumber: pr.prNumber,
+          title: pr.title,
+          status: pr.status,
+          createdAt: pr.createdAt,
+          mergedAt: pr.mergedAt ?? null,
+          filesChanged: analysis?.filesChanged ?? [],
+          impactedPaths: analysis?.impactedPaths ?? [],
+          riskLevel: analysis?.riskLevel ?? null,
+        };
+      });
+
+      const allPaths = new Set<string>();
+      prSummaries.forEach((pr) => {
+        (pr.impactedPaths ?? []).forEach((p: string) => allPaths.add(p));
+      });
+
+      const contributionSummary = {
+        repo: {
+          repoId: String(repoId),
+          owner: repo.repoOwner,
+          name: repo.repoName,
+        },
+        contributor: {
+          contributorId: String(contributor._id),
+          login: contributor.login,
+          name: contributor.name ?? null,
+        },
+        aggregateStats: {
+          prCount: prSummaries.length,
+          linesChanged: link.linesChanged,
+          pathsTouched: Array.from(allPaths),
+        },
+        pullRequests: prSummaries,
+      };
+
+      const prompt = [
+        "You are the Contributor Profiler agent.",
+        "You will be given JSON describing a single contributor's behavior in this repository.",
+        "Your job is to infer their primary role, seniority, main areas of ownership, and a short profile summary.",
+        "",
+        "CRITICAL: When you are ready, call the `saveRepoContributorProfile` tool EXACTLY ONCE",
+        "using the provided `repoId` and `contributorId` fields from the JSON below.",
+        "Do not invent ids; use them as-is.",
+        "",
+        "Here is the input JSON:",
+        JSON.stringify(contributionSummary),
+      ].join("\n\n");
+
+      await contributorProfilerAgent.generateText(
+        ctx,
+        {
+          // Use repo owner as a stable \"user\" identity for this agent family.
+          userId: String(repo.ownerUserId),
+        },
+        { prompt }
+      );
+    }
+  },
+});
+
+/**
+ * ManualAnalysisSessionWorkflow (Repo snapshot focus)
+ *
+ * Creates an analysis session of type \"full_repo\", gathers repo-level
+ * context (tech stack, recent PR analyses, history), and asks the
+ * Repo Snapshot agent to persist a structured snapshot via its tool.
+ */
+export const runRepoSnapshotWorkflow = action({
+  args: { repoId: v.id("repos") },
+  handler: async (ctx, { repoId }) => {
+    const repo = await ctx.runQuery(api.app.getRepo, { repoId });
+    if (!repo) return;
+
+    const [techStack, prAnalyses, history] = await Promise.all([
+      ctx.runQuery(api.app.listTechStackItemsForRepo, { repoId }),
+      ctx.runQuery(api.app.listPrAnalysesForRepo, { repoId }),
+      ctx.runQuery(api.app.listHistoryCheckpointsForRepo, { repoId }),
+    ]);
+
+    const sessionId = await ctx.runMutation(api.app.createAnalysisSession, {
+      repoId,
+      userId: repo.ownerUserId,
+      sessionType: "full_repo",
+      status: "running",
+      config: { kind: "repo_snapshot" },
+      summary: `Repo snapshot for ${repo.repoOwner}/${repo.repoName}`,
+    });
+
+    // Take the most recent N PR analyses to keep context size bounded.
+    const recentAnalyses = [...(prAnalyses ?? [])]
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .sort((a: any, b: any) => {
+        const at = a.updatedAt ?? a.createdAt;
+        const bt = b.updatedAt ?? b.createdAt;
+        return bt - at;
+      })
+      .slice(0, 25);
+
+    const snapshotInput = {
+      analysisSessionId: String(sessionId),
+      repoId: String(repoId),
+      repo: {
+        owner: repo.repoOwner,
+        name: repo.repoName,
+        description: repo.description ?? null,
+        defaultBranch: repo.defaultBranch,
+        url: repo.url,
+      },
+      techStack: techStack ?? [],
+      recentPrAnalyses: recentAnalyses,
+      historyCheckpoints: history ?? [],
+    };
+
+    const prompt = [
+      "You are the Repo Snapshot agent.",
+      "You are given JSON describing a repository and its recent activity.",
+      "Use it to understand the tech stack, main modules, risky/high-churn areas, and suggested next steps.",
+      "",
+      "IMPORTANT: When you are ready, call the `saveRepoSnapshotResult` tool EXACTLY ONCE.",
+      "Use the `analysisSessionId` and `repoId` from the JSON as-is.",
+      "",
+      "Here is the input JSON:",
+      JSON.stringify(snapshotInput),
+    ].join("\n\n");
+
+    await repoSnapshotAgent.generateText(
+      ctx,
+      {
+        userId: String(repo.ownerUserId),
+      },
+      { prompt }
+    );
+
+    await ctx.runMutation(api.app.updateAnalysisSessionStatus, {
+      analysisSessionId: sessionId,
+      status: "completed",
+      startedAt: Date.now(),
+      completedAt: Date.now(),
+    });
+  },
+});
+
+/**
+ * NightlyHistorySynthesisWorkflow (can also be triggered manually)
+ *
+ * Gathers recent raw events for a repo (PR analyses, analysis sessions,
+ * calls, existing checkpoints) and asks the History Synthesis agent to
+ * compress them into a small set of high-level history checkpoints.
+ */
+export const runHistorySynthesisWorkflow = action({
+  args: {
+    repoId: v.id("repos"),
+    // Optional window in days; defaults to 30.
+    windowDays: v.optional(v.number()),
+  },
+  handler: async (ctx, { repoId, windowDays }) => {
+    const days = windowDays ?? 30;
+    const now = Date.now();
+    const windowStart = now - days * 24 * 60 * 60 * 1000;
+
+    const [prAnalyses, analysisSessions, calls, history] = await Promise.all([
+      ctx.runQuery(api.app.listPrAnalysesForRepo, { repoId }),
+      ctx.runQuery(api.app.listAnalysisSessionsForRepo, { repoId }),
+      ctx.runQuery(api.app.listCallsForRepo, { repoId }),
+      ctx.runQuery(api.app.listHistoryCheckpointsForRepo, { repoId }),
+    ]);
+
+    // Filter events to the requested time window where we have timestamps.
+    const inWindow = <T extends { createdAt?: number; eventAt?: number }>(
+      items: T[]
+    ) =>
+      items.filter((i) => {
+        const t = (i as any).eventAt ?? (i as any).createdAt;
+        return typeof t === "number" && t >= windowStart;
+      });
+
+    const synthesisInput = {
+      repoId: String(repoId),
+      windowStart,
+      windowEnd: now,
+      prAnalyses: inWindow(prAnalyses ?? []),
+      analysisSessions: inWindow(analysisSessions ?? []),
+      calls: inWindow(calls ?? []),
+      historyCheckpoints: inWindow(history ?? []),
+    };
+
+    const prompt = [
+      "You are the History Synthesis agent.",
+      "You are given JSON with recent raw events for a repository.",
+      "Pick 3–10 of the most important milestones that summarize this window.",
+      "",
+      "CRITICAL: When you are ready, call the `saveHistoryCheckpoints` tool EXACTLY ONCE",
+      "with your synthesized checkpoints. Use the provided repoId as-is.",
+      "",
+      "Here is the input JSON:",
+      JSON.stringify(synthesisInput),
+    ].join("\n\n");
+
+    await historySynthesisAgent.generateText(
+      ctx,
+      { userId: String(repoId) },
+      { prompt }
+    );
+  },
+});
+
+/**
+ * High-level convenience action that kicks off all major analysis
+ * workflows for a repo:
+ * - Repo snapshot (general info / tech stack / roadmap)
+ * - PR auto-analysis (per-PR summaries and risk levels)
+ * - Contributor profile refresh (roles, seniority, areas)
+ * - History synthesis (high-level checkpoints)
+ *
+ * This is what the frontend \"Run analysis\" button should call.
+ */
+export const runFullAnalysisWorkflow = action({
+  args: { repoId: v.id("repos") },
+  handler: async (ctx, { repoId }) => {
+    // Run the sub-workflows asynchronously via the scheduler so that
+    // this action returns quickly and we avoid long-running timeouts.
+    await ctx.scheduler.runAfter(0, api.prAgent.runRepoSnapshotWorkflow, {
+      repoId,
+    });
+    await ctx.scheduler.runAfter(0, api.prAgent.runRepoAnalysisWorkflow, {
+      repoId,
+    });
+    await ctx.scheduler.runAfter(
+      0,
+      api.prAgent.runContributorProfileRefreshWorkflow,
+      { repoId }
+    );
+    await ctx.scheduler.runAfter(
+      0,
+      api.prAgent.runHistorySynthesisWorkflow,
+      {
+        repoId,
+        windowDays: 30,
+      }
+    );
   },
 });
 

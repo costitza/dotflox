@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { useMemo, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -31,6 +31,7 @@ export default function RepoDashboardPage() {
 
   const router = useRouter();
   const deleteRepo = useMutation(api.app.deleteRepoAndData);
+  const runFullAnalysis = useAction(api.prAgent.runFullAnalysisWorkflow);
 
   const repo = useQuery(
     api.app.getRepo,
@@ -106,6 +107,21 @@ export default function RepoDashboardPage() {
   const contributors = contributorsDetailed ?? [];
   const sessions = analysisSessions ?? [];
   const callSessions = calls ?? [];
+
+  const latestSnapshotSession = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const snapshotSessions = (sessions as any[]).filter((s: any) => {
+      const kind = (s.config as any)?.kind;
+      return s.sessionType === "full_repo" && kind === "repo_snapshot";
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    snapshotSessions.sort((a: any, b: any) => {
+      const at = a.updatedAt ?? a.createdAt;
+      const bt = b.updatedAt ?? b.createdAt;
+      return bt - at;
+    });
+    return snapshotSessions[0] ?? null;
+  }, [sessions]);
 
   function getPrAnalysisStatus(prId: Id<"pullRequests">) {
     const related = analyses.filter((a) => a.pullRequestId === prId);
@@ -200,6 +216,36 @@ export default function RepoDashboardPage() {
                   <p className="text-sm text-slate-600">{repo.description}</p>
                 )}
               </div>
+
+              {latestSnapshotSession && (
+                <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/80 p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                    Latest repo snapshot
+                  </p>
+                  {latestSnapshotSession.summary && (
+                    <p className="text-xs text-slate-700">
+                      {latestSnapshotSession.summary}
+                    </p>
+                  )}
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  {((latestSnapshotSession.config as any)?.snapshot
+                    ?.suggestedNextSteps ?? []).length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                        Suggested next steps
+                      </p>
+                      <ul className="list-disc space-y-0.5 pl-4 text-xs text-slate-700">
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                        {(latestSnapshotSession.config as any).snapshot.suggestedNextSteps.map(
+                          (step: string) => (
+                            <li key={step}>{step}</li>
+                          ),
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {techItems.length > 0 && (
                 <div className="space-y-2">
@@ -302,6 +348,24 @@ export default function RepoDashboardPage() {
                             {link.role ?? "Contributor"} ·{" "}
                             {link.seniority ?? "Unspecified"}
                           </p>
+                          {Array.isArray(link.mainAreas) &&
+                            link.mainAreas.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {link.mainAreas.map((area: string) => (
+                                  <span
+                                    key={area}
+                                    className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600"
+                                  >
+                                    {area}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          {link.profileSummary && (
+                            <p className="mt-1 text-[11px] text-slate-600">
+                              {link.profileSummary}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="text-right">
@@ -411,10 +475,12 @@ export default function RepoDashboardPage() {
                   size="sm"
                   className="h-7 rounded-full bg-[#2563eb] px-3 text-[11px] font-semibold text-white hover:bg-[#1d4ed8]"
                   type="button"
-                  onClick={() => {
-                    // Placeholder for future analysis workflow
+                  onClick={async () => {
+                    await runFullAnalysis({ repoId });
                     // eslint-disable-next-line no-alert
-                    alert("Analysis triggering coming soon.");
+                    alert(
+                      "Full analysis started. Refresh this page in a bit to see updated insights.",
+                    );
                   }}
                 >
                   Run analysis
