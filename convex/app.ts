@@ -644,6 +644,7 @@ export const createAnalysisSession = mutation({
       v.literal("pr_auto"),
       v.literal("manual_snapshot"),
       v.literal("full_repo"),
+      v.literal("call"),
       v.literal("other")
     ),
     status: v.union(

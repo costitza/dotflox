@@ -1,13 +1,10 @@
 "use server";
 
-const ELEVENLABS_STT_URL =
-  process.env.ELEVENLABS_STT_URL ??
-  "https://api.elevenlabs.io/v1/speech-to-text";
+import { experimental_transcribe as transcribe } from "ai";
+import { elevenlabs } from "@ai-sdk/elevenlabs";
 
 export async function POST(req: Request) {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-
-  if (!apiKey) {
+  if (!process.env.ELEVENLABS_API_KEY) {
     return new Response("Speech-to-text is not configured.", { status: 500 });
   }
 
@@ -27,44 +24,34 @@ export async function POST(req: Request) {
     });
   }
 
-  const model =
-    (typeof incoming.get("model") === "string"
-      ? (incoming.get("model") as string)
-      : "") || "scribe_v1";
+  // Convert the uploaded File into a Uint8Array for the AI SDK.
+  const arrayBuffer = await audioFile.arrayBuffer();
+  const audioBytes = new Uint8Array(arrayBuffer);
 
-  const elevenForm = new FormData();
-  elevenForm.set("file", audioFile);
-  elevenForm.set("model_id", model);
+  // Optional language hint; defaults to automatic detection.
+  const language =
+    typeof incoming.get("language") === "string"
+      ? (incoming.get("language") as string)
+      : undefined;
 
-  const elevenRes = await fetch(ELEVENLABS_STT_URL, {
-    method: "POST",
-    headers: {
-      "xi-api-key": apiKey,
+  const result = await transcribe({
+    // Use the ElevenLabs transcription model as documented:
+    // https://ai-sdk.dev/providers/ai-sdk-providers/elevenlabs
+    model: elevenlabs.transcription("scribe_v1"),
+    audio: audioBytes,
+    providerOptions: {
+      elevenlabs: language ? { languageCode: language } : {},
     },
-    body: elevenForm,
   });
 
-  if (!elevenRes.ok) {
-    const errorText = await elevenRes.text().catch(() => "");
-    return new Response(
-      `ElevenLabs STT request failed: ${elevenRes.status} ${errorText}`,
-      { status: 502 },
-    );
-  }
+  // The AI SDK returns a `text` field for ElevenLabs transcriptions.
+  const text = (result as any)?.text?.trim?.() ?? "";
 
-  const data = (await elevenRes.json().catch(() => null)) as
-    | { text?: string; transcription?: string }
-    | null;
-
-  const transcript = data?.text ?? data?.transcription ?? "";
-
-  if (!transcript) {
+  if (!text) {
     return new Response("No transcript returned from ElevenLabs.", {
       status: 502,
     });
   }
 
-  return Response.json({ text: transcript });
+  return Response.json({ text });
 }
-
-
