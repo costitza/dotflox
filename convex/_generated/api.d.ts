@@ -11,6 +11,7 @@
 import type * as agents_PRAnalyzer from "../agents/PRAnalyzer.js";
 import type * as github from "../github.js";
 import type * as prAgent from "../prAgent.js";
+import type * as repos from "../repos.js";
 
 import type {
   ApiFromModules,
@@ -22,6 +23,7 @@ declare const fullApi: ApiFromModules<{
   "agents/PRAnalyzer": typeof agents_PRAnalyzer;
   github: typeof github;
   prAgent: typeof prAgent;
+  repos: typeof repos;
 }>;
 
 /**
