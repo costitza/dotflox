@@ -1,7 +1,7 @@
 import { action, query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
-import { Octokit } from "@octokit/rest";
 import { internal } from "./_generated/api";
+import { createGithubClient } from "../lib/github";
 
 export const getOrCreateUser = internalMutation({
   args: {},
@@ -102,35 +102,70 @@ export const addFromGithub = action({
   args: {
     owner: v.string(),
     name: v.string(),
-    // GitHub OAuth access token for the current user, obtained via Clerk's
-    // getUserOauthAccessToken() on your Next.js backend.
     githubAccessToken: v.string(),
   },
   handler: async (ctx, { owner, name, githubAccessToken }) => {
     const user = await ctx.runMutation(internal.repos.getOrCreateUser, {});
 
-    // Use the per-user GitHub OAuth access token from Clerk rather than
-    // a single app-wide PAT. This lets us act on behalf of the signed-in user.
-    const octokit = new Octokit({
-      auth: githubAccessToken,
-    });
+    const github = createGithubClient(githubAccessToken);
 
-    const { data: repo } = await octokit.repos.get({
-      owner,
-      repo: name,
-    });
-
-    const githubRepoId = String(repo.id);
+    const repoData = await github.getRepo(owner, name);
+    const githubRepoId = String(repoData.id);
 
     const { repoId } = await ctx.runMutation(internal.repos.saveGithubRepo, {
       ownerUserId: user._id,
       githubRepoId,
-      repoOwner: (repo.owner as any)?.login ?? owner,
-      repoName: repo.name,
-      description: repo.description ?? undefined,
-      url: repo.html_url,
-      defaultBranch: repo.default_branch,
+      repoOwner: (repoData.owner as any)?.login ?? owner,
+      repoName: repoData.name,
+      description: repoData.description ?? undefined,
+      url: repoData.html_url,
+      defaultBranch: repoData.default_branch,
     });
+
+    const pullRequests = await github.listPullRequests(owner, name);
+    const syncedAt = Date.now();
+
+    for (const pr of pullRequests) {
+      const fullPr = await github.getPullRequest(owner, name, pr.number);
+
+      await ctx.runMutation(internal.github.syncPullRequestFromGithub, {
+        repo: {
+          githubRepoId,
+          owner,
+          name: repoData.name,
+          description: repoData.description ?? undefined,
+          url: repoData.html_url,
+          defaultBranch: repoData.default_branch,
+        },
+        author: {
+          githubUserId: String(fullPr.user?.id ?? ""),
+          login: fullPr.user?.login ?? "unknown",
+          name: fullPr.user?.name ?? undefined,
+          avatarUrl: fullPr.user?.avatar_url ?? undefined,
+        },
+        pullRequest: {
+          githubPrId: String(fullPr.id),
+          number: fullPr.number,
+          title: fullPr.title ?? "",
+          body: fullPr.body ?? undefined,
+          state: fullPr.state === "open" ? "open" : "closed",
+          merged: Boolean(fullPr.merged_at),
+          createdAt: new Date(fullPr.created_at).getTime(),
+          mergedAt: fullPr.merged_at
+            ? new Date(fullPr.merged_at).getTime()
+            : undefined,
+          closedAt: fullPr.closed_at
+            ? new Date(fullPr.closed_at).getTime()
+            : undefined,
+        },
+        stats: {
+          additions: fullPr.additions ?? 0,
+          deletions: fullPr.deletions ?? 0,
+          changedFiles: fullPr.changed_files ?? 0,
+        },
+        syncedAt,
+      });
+    }
 
     return { repoId };
   },
