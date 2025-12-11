@@ -1,51 +1,104 @@
-import { mutation, query } from "./_generated/server";
+import { action, query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Octokit } from "@octokit/rest";
+import { internal } from "./_generated/api";
 
-async function getOrCreateUser(ctx: any) {
-  const identity = await ctx.auth.getUserIdentity();
+export const getOrCreateUser = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
 
-  if (!identity) {
-    throw new Error("Not authenticated");
-  }
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
 
-  const externalAuthId = identity.subject;
-  const email = identity.email ?? "unknown@example.com";
-  const name =
-    identity.name ?? identity.givenName ?? identity.familyName ?? undefined;
+    const externalAuthId = identity.subject;
+    const email = identity.email ?? "unknown@example.com";
+    const name =
+      identity.name ?? identity.givenName ?? identity.familyName ?? undefined;
 
-  let user = await ctx.db
-    .query("users")
-    .withIndex("byExternalAuthId", (q: any) => q.eq("externalAuthId", externalAuthId))
-    .unique();
+    let user = await ctx.db
+      .query("users")
+      .withIndex("byExternalAuthId", (q: any) =>
+        q.eq("externalAuthId", externalAuthId)
+      )
+      .unique();
 
-  const now = Date.now();
+    const now = Date.now();
 
-  if (!user) {
-    const userId = await ctx.db.insert("users", {
-      externalAuthId,
-      email,
-      name,
+    if (!user) {
+      const userId = await ctx.db.insert("users", {
+        externalAuthId,
+        email,
+        name,
+        createdAt: now,
+        updatedAt: now,
+      });
+      user = await ctx.db.get(userId);
+    } else {
+      await ctx.db.patch(user._id, {
+        email: email || user.email,
+        name: name ?? user.name,
+        updatedAt: now,
+      });
+    }
+
+    if (!user) {
+      throw new Error("Failed to load or create user");
+    }
+
+    return user;
+  },
+});
+
+export const saveGithubRepo = internalMutation({
+  args: {
+    ownerUserId: v.id("users"),
+    githubRepoId: v.string(),
+    repoOwner: v.string(),
+    repoName: v.string(),
+    description: v.optional(v.string()),
+    url: v.string(),
+    defaultBranch: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+
+    const existing = await ctx.db
+      .query("repos")
+      .withIndex("byGithubRepoId", (q: any) => q.eq("githubRepoId", args.githubRepoId))
+      .unique();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        ownerUserId: args.ownerUserId,
+        repoOwner: args.repoOwner,
+        repoName: args.repoName,
+        description: args.description ?? existing.description,
+        url: args.url,
+        defaultBranch: args.defaultBranch,
+        updatedAt: now,
+      });
+      return { repoId: existing._id };
+    }
+
+    const repoId = await ctx.db.insert("repos", {
+      ownerUserId: args.ownerUserId,
+      githubRepoId: args.githubRepoId,
+      repoOwner: args.repoOwner,
+      repoName: args.repoName,
+      description: args.description ?? undefined,
+      url: args.url,
+      defaultBranch: args.defaultBranch,
       createdAt: now,
       updatedAt: now,
     });
-    user = await ctx.db.get(userId);
-  } else {
-    await ctx.db.patch(user._id, {
-      email: email || user.email,
-      name: name ?? user.name,
-      updatedAt: now,
-    });
-  }
 
-  if (!user) {
-    throw new Error("Failed to load or create user");
-  }
+    return { repoId };
+  },
+});
 
-  return user;
-}
-
-export const addFromGithub = mutation({
+export const addFromGithub = action({
   args: {
     owner: v.string(),
     name: v.string(),
@@ -54,7 +107,7 @@ export const addFromGithub = mutation({
     githubAccessToken: v.string(),
   },
   handler: async (ctx, { owner, name, githubAccessToken }) => {
-    const user = await getOrCreateUser(ctx);
+    const user = await ctx.runMutation(internal.repos.getOrCreateUser, {});
 
     // Use the per-user GitHub OAuth access token from Clerk rather than
     // a single app-wide PAT. This lets us act on behalf of the signed-in user.
@@ -67,29 +120,9 @@ export const addFromGithub = mutation({
       repo: name,
     });
 
-    const now = Date.now();
     const githubRepoId = String(repo.id);
 
-    const existing = await ctx.db
-      .query("repos")
-      .withIndex("byGithubRepoId", (q: any) => q.eq("githubRepoId", githubRepoId))
-      .unique();
-
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        ownerUserId: user._id,
-        repoOwner: (repo.owner as any)?.login ?? owner,
-        repoName: repo.name,
-        description: repo.description ?? existing.description,
-        url: repo.html_url,
-        defaultBranch: repo.default_branch,
-        updatedAt: now,
-      });
-
-      return { repoId: existing._id };
-    }
-
-    const repoId = await ctx.db.insert("repos", {
+    const { repoId } = await ctx.runMutation(internal.repos.saveGithubRepo, {
       ownerUserId: user._id,
       githubRepoId,
       repoOwner: (repo.owner as any)?.login ?? owner,
@@ -97,8 +130,6 @@ export const addFromGithub = mutation({
       description: repo.description ?? undefined,
       url: repo.html_url,
       defaultBranch: repo.default_branch,
-      createdAt: now,
-      updatedAt: now,
     });
 
     return { repoId };

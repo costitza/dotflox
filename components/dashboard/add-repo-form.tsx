@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useMutation } from "convex/react";
+import { useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 
@@ -10,7 +10,7 @@ type AddRepoFormProps = {
 };
 
 export function AddRepoForm({ onAdded }: AddRepoFormProps) {
-  const addRepo = useMutation(api.repos.addFromGithub);
+  const addRepo = useAction(api.repos.addFromGithub);
   const [owner, setOwner] = useState("");
   const [name, setName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
