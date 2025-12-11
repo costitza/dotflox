@@ -82,24 +82,6 @@ export default function RepoDashboardPage() {
     });
     return map;
   }, [prAnalyses]);
-
-  if (!repo) {
-    return (
-      <div className="min-h-screen bg-slate-50 text-slate-900">
-        <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center text-sm text-slate-600 hover:text-slate-900"
-          >
-            <ArrowLeft className="mr-1 h-4 w-4" />
-            Back to dashboard
-          </Link>
-          <p className="mt-6 text-sm text-slate-600">Loading repository…</p>
-        </main>
-      </div>
-    );
-  }
-
   const techItems = techStack ?? [];
   const historyItems = history ?? [];
   const prs = pullRequests ?? [];
@@ -122,6 +104,23 @@ export default function RepoDashboardPage() {
     });
     return snapshotSessions[0] ?? null;
   }, [sessions]);
+
+  if (!repo) {
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-900">
+        <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center text-sm text-slate-600 hover:text-slate-900"
+          >
+            <ArrowLeft className="mr-1 h-4 w-4" />
+            Back to dashboard
+          </Link>
+          <p className="mt-6 text-sm text-slate-600">Loading repository…</p>
+        </main>
+      </div>
+    );
+  }
 
   function getPrAnalysisStatus(prId: Id<"pullRequests">) {
     const related = analyses.filter((a) => a.pullRequestId === prId);

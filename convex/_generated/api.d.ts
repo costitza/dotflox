@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as agents_CallSummarizer from "../agents/CallSummarizer.js";
 import type * as agents_ContributorProfiler from "../agents/ContributorProfiler.js";
 import type * as agents_HistorySynthesizer from "../agents/HistorySynthesizer.js";
 import type * as agents_PRAnalyzer from "../agents/PRAnalyzer.js";
@@ -27,6 +28,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "agents/CallSummarizer": typeof agents_CallSummarizer;
   "agents/ContributorProfiler": typeof agents_ContributorProfiler;
   "agents/HistorySynthesizer": typeof agents_HistorySynthesizer;
   "agents/PRAnalyzer": typeof agents_PRAnalyzer;
