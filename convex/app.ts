@@ -155,6 +155,40 @@ export const listContributorsForRepo = query({
   },
 });
 
+export const listRepoContributorsDetailed = query({
+  args: { repoId: v.id("repos") },
+  handler: async (ctx, { repoId }) => {
+    const links = await ctx.db
+      .query("repoContributors")
+      .withIndex("byRepo", (q) => q.eq("repoId", repoId))
+      .collect();
+
+    const contributors = await Promise.all(
+      links.map((link) => ctx.db.get(link.contributorId))
+    );
+
+    return links
+      .map((link, index) =>
+        contributors[index]
+          ? {
+              repoContributor: link,
+              contributor: contributors[index]!,
+            }
+          : null
+      )
+      .filter(
+        (
+          x
+        ): x is {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          repoContributor: any;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          contributor: any;
+        } => x !== null
+      );
+  },
+});
+
 export const upsertContributor = mutation({
   args: {
     githubUserId: v.string(),
@@ -303,6 +337,16 @@ export const listPrAnalysesForPullRequest = query({
     return ctx.db
       .query("prAnalyses")
       .withIndex("byPullRequest", (q) => q.eq("pullRequestId", pullRequestId))
+      .collect();
+  },
+});
+
+export const listPrAnalysesForRepo = query({
+  args: { repoId: v.id("repos") },
+  handler: async (ctx, { repoId }) => {
+    return ctx.db
+      .query("prAnalyses")
+      .withIndex("byRepo", (q) => q.eq("repoId", repoId))
       .collect();
   },
 });

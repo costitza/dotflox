@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { SignedIn, SignedOut, SignInButton, useUser } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
 import { Button } from "@/components/ui/button";
@@ -135,8 +136,9 @@ export default function DashboardPage() {
                     <div className="divide-y divide-slate-100 bg-white text-sm">
                       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                       {repos.map((repo: any) => (
-                        <div
+                        <Link
                           key={repo._id}
+                          href={`/dashboard/${repo._id}`}
                           className="grid grid-cols-[minmax(0,2.2fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] items-center px-4 py-3 hover:bg-slate-50/80"
                         >
                           <div className="space-y-0.5">
@@ -159,7 +161,7 @@ export default function DashboardPage() {
                           <div className="text-[12px] text-slate-600">
                             {new Date(repo.updatedAt).toLocaleDateString()}
                           </div>
-                        </div>
+                        </Link>
                       ))}
                     </div>
                   </div>
