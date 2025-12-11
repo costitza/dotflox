@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useMutation } from "convex/react";
+import { useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 
@@ -10,7 +10,7 @@ type AddRepoFormProps = {
 };
 
 export function AddRepoForm({ onAdded }: AddRepoFormProps) {
-  const addRepo = useMutation(api.repos.addFromGithub);
+  const addRepo = useAction(api.repos.addFromGithub);
   const [owner, setOwner] = useState("");
   const [name, setName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,7 +30,21 @@ export function AddRepoForm({ onAdded }: AddRepoFormProps) {
 
     try {
       setIsSubmitting(true);
-      await addRepo({ owner: trimmedOwner, name: trimmedName });
+      const res = await fetch("/api/github-token");
+      if (!res.ok) {
+        throw new Error(
+          res.status === 404
+            ? "No GitHub OAuth token found. Make sure you've connected GitHub in Clerk."
+            : "Failed to retrieve GitHub OAuth token."
+        );
+      }
+      const { token } = (await res.json()) as { token: string };
+
+      await addRepo({
+        owner: trimmedOwner,
+        name: trimmedName,
+        githubAccessToken: token,
+      });
       setOwner("");
       setName("");
       setIsSubmitting(false);
