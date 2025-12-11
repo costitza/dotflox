@@ -60,6 +60,7 @@ export const saveGithubRepo = internalMutation({
     description: v.optional(v.string()),
     url: v.string(),
     defaultBranch: v.string(),
+    githubAccessToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -77,6 +78,7 @@ export const saveGithubRepo = internalMutation({
         description: args.description ?? existing.description,
         url: args.url,
         defaultBranch: args.defaultBranch,
+        githubAccessToken: args.githubAccessToken ?? existing.githubAccessToken,
         updatedAt: now,
       });
       return { repoId: existing._id };
@@ -90,6 +92,7 @@ export const saveGithubRepo = internalMutation({
       description: args.description ?? undefined,
       url: args.url,
       defaultBranch: args.defaultBranch,
+      githubAccessToken: args.githubAccessToken,
       createdAt: now,
       updatedAt: now,
     });
@@ -120,6 +123,7 @@ export const addFromGithub = action({
       description: repoData.description ?? undefined,
       url: repoData.html_url,
       defaultBranch: repoData.default_branch,
+      githubAccessToken,
     });
 
     const pullRequests = await github.listPullRequests(owner, name);

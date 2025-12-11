@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useQuery } from "convex/react";
+import { useParams, useRouter } from "next/navigation";
+import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,9 @@ import {
 export default function RepoDashboardPage() {
   const params = useParams<{ repoId: string }>();
   const repoId = params.repoId as Id<"repos">;
+
+  const router = useRouter();
+  const deleteRepo = useMutation(api.app.deleteRepoAndData);
 
   const repo = useQuery(
     api.app.getRepo,
@@ -121,15 +124,33 @@ export default function RepoDashboardPage() {
               </h1>
             </div>
           </div>
-          <Button
-            asChild
-            size="sm"
-            className="rounded-full bg-[#2563eb] px-4 text-xs font-semibold text-white shadow-sm hover:bg-[#1d4ed8]"
-          >
-            <Link href={repo.url} target="_blank" rel="noreferrer">
-              Open on GitHub
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              asChild
+              size="sm"
+              className="rounded-full bg-[#2563eb] px-4 text-xs font-semibold text-white shadow-sm hover:bg-[#1d4ed8]"
+            >
+              <Link href={repo.url} target="_blank" rel="noreferrer">
+                Open on GitHub
+              </Link>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="rounded-full border-rose-200 text-rose-600 hover:bg-rose-50"
+              type="button"
+              onClick={async () => {
+                const confirmed = window.confirm(
+                  "Delete this repository and all its synced data from .flux? This cannot be undone."
+                );
+                if (!confirmed) return;
+                await deleteRepo({ repoId });
+                router.push("/dashboard");
+              }}
+            >
+              Delete & reset
+            </Button>
+          </div>
         </div>
 
         {/* Top grid: General info + Contributors */}

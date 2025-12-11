@@ -1,5 +1,7 @@
-import { internalMutation, mutation } from "./_generated/server";
+import { action, internalMutation, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { api, internal } from "./_generated/api";
+import { createGithubClient } from "../lib/github";
 
 // Shared validator for syncing a GitHub pull request into Convex.
 // Re-use this for both the internal mutation (used by the Agent tool)
@@ -206,5 +208,132 @@ export const syncPullRequestFromGithub = internalMutation({
 export const syncPullRequestFromGithubMutation = mutation({
   args: syncPullRequestArgs,
   handler: async (ctx, args) => syncPullRequestCore(ctx, args),
+});
+
+// Action: sync all PRs for a single repo from GitHub.
+// Uses an app-level GITHUB_TOKEN, suitable for cron / scheduled sync.
+export const syncRepoPullRequestsFromGithub = action({
+  args: {
+    repoId: v.id("repos"),
+  },
+  handler: async (ctx, { repoId }) => {
+    const repo = await ctx.runQuery(api.app.getRepo, { repoId });
+    if (!repo) return;
+
+    const token = repo.githubAccessToken;
+    if (!token) {
+      // No per-repo token configured; skip.
+      return;
+    }
+
+    const github = createGithubClient(token);
+
+    const allPullRequests = await github.listPullRequests(
+      repo.repoOwner,
+      repo.repoName
+    );
+    // Only keep open PRs so our Convex view matches GitHub's
+    // default open-PR list.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pullRequests = allPullRequests.filter((pr: any) => pr.state === "open");
+    const syncedAt = Date.now();
+
+    for (const pr of pullRequests) {
+      const fullPr = await github.getPullRequest(
+        repo.repoOwner,
+        repo.repoName,
+        pr.number
+      );
+
+      await ctx.runMutation(internal.github.syncPullRequestFromGithub, {
+        repo: {
+          githubRepoId: repo.githubRepoId,
+          owner: repo.repoOwner,
+          name: repo.repoName,
+          description: repo.description ?? undefined,
+          url: repo.url,
+          defaultBranch: repo.defaultBranch,
+        },
+        author: {
+          githubUserId: String(fullPr.user?.id ?? ""),
+          login: fullPr.user?.login ?? "unknown",
+          name: fullPr.user?.name ?? undefined,
+          avatarUrl: fullPr.user?.avatar_url ?? undefined,
+        },
+        pullRequest: {
+          githubPrId: String(fullPr.id),
+          number: fullPr.number,
+          title: fullPr.title ?? "",
+          body: fullPr.body ?? undefined,
+          state: fullPr.state === "open" ? "open" : "closed",
+          merged: Boolean(fullPr.merged_at),
+          createdAt: new Date(fullPr.created_at).getTime(),
+          mergedAt: fullPr.merged_at
+            ? new Date(fullPr.merged_at).getTime()
+            : undefined,
+          closedAt: fullPr.closed_at
+            ? new Date(fullPr.closed_at).getTime()
+            : undefined,
+        },
+        stats: {
+          additions: fullPr.additions ?? 0,
+          deletions: fullPr.deletions ?? 0,
+          changedFiles: fullPr.changed_files ?? 0,
+        },
+        syncedAt,
+      });
+    }
+
+    // After syncing open PRs, prune any PR documents that are no longer open.
+    const openPrNumbers = pullRequests.map(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (pr: any) => pr.number as number
+    );
+
+    await ctx.runMutation(
+      internal.github.pruneClosedPullRequestsForRepo,
+      { repoId, openPrNumbers }
+    );
+  },
+});
+
+// Internal mutation: schedules sync actions for all repos.
+export const scheduleGithubSyncAllRepos = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const repos = await ctx.db.query("repos").collect();
+
+    for (const repo of repos) {
+      await ctx.scheduler.runAfter(
+        0,
+        api.github.syncRepoPullRequestsFromGithub,
+        { repoId: repo._id }
+      );
+    }
+  },
+});
+
+// Internal mutation: delete PRs for a repo that are not currently
+// open on GitHub (based on PR numbers). This keeps the Convex
+// pullRequests table aligned with GitHub's open-PR view.
+export const pruneClosedPullRequestsForRepo = internalMutation({
+  args: {
+    repoId: v.id("repos"),
+    openPrNumbers: v.array(v.number()),
+  },
+  handler: async (ctx, { repoId, openPrNumbers }) => {
+    const openSet = new Set(openPrNumbers);
+
+    const prs = await ctx.db
+      .query("pullRequests")
+      .withIndex("byRepo", (q: any) => q.eq("repoId", repoId))
+      .collect();
+
+    for (const pr of prs) {
+      if (!openSet.has(pr.prNumber)) {
+        await ctx.db.delete(pr._id);
+      }
+    }
+  },
 });
 
