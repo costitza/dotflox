@@ -2,10 +2,6 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { Octokit } from "@octokit/rest";
 
-const octokit = new Octokit({
-  auth: process.env.GITHUB_TOKEN,
-});
-
 async function getOrCreateUser(ctx: any) {
   const identity = await ctx.auth.getUserIdentity();
 
@@ -53,13 +49,18 @@ export const addFromGithub = mutation({
   args: {
     owner: v.string(),
     name: v.string(),
+    // GitHub OAuth access token for the current user, obtained via Clerk's
+    // getUserOauthAccessToken() on your Next.js backend.
+    githubAccessToken: v.string(),
   },
-  handler: async (ctx, { owner, name }) => {
+  handler: async (ctx, { owner, name, githubAccessToken }) => {
     const user = await getOrCreateUser(ctx);
 
-    if (!process.env.GITHUB_TOKEN) {
-      throw new Error("GitHub token not configured on the server");
-    }
+    // Use the per-user GitHub OAuth access token from Clerk rather than
+    // a single app-wide PAT. This lets us act on behalf of the signed-in user.
+    const octokit = new Octokit({
+      auth: githubAccessToken,
+    });
 
     const { data: repo } = await octokit.repos.get({
       owner,
@@ -77,7 +78,7 @@ export const addFromGithub = mutation({
     if (existing) {
       await ctx.db.patch(existing._id, {
         ownerUserId: user._id,
-        repoOwner: owner,
+        repoOwner: (repo.owner as any)?.login ?? owner,
         repoName: repo.name,
         description: repo.description ?? existing.description,
         url: repo.html_url,
@@ -91,7 +92,7 @@ export const addFromGithub = mutation({
     const repoId = await ctx.db.insert("repos", {
       ownerUserId: user._id,
       githubRepoId,
-      repoOwner: owner,
+      repoOwner: (repo.owner as any)?.login ?? owner,
       repoName: repo.name,
       description: repo.description ?? undefined,
       url: repo.html_url,
