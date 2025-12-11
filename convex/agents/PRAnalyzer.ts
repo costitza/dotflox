@@ -2,6 +2,7 @@ import { Agent, createTool } from "@convex-dev/agent";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { components, internal } from "../_generated/api";
+import type { Id } from "../_generated/dataModel";
 
 /**
  * Tool: syncGithubPullRequest
@@ -101,7 +102,14 @@ export const syncGithubPullRequest = createTool({
   }),
   // ToolCtx includes ActionCtx, so we can call ctx.runMutation
   // with functions from the generated Convex API.
-  handler: async (ctx, args) => {
+  handler: async (
+    ctx,
+    args
+  ): Promise<{
+    pullRequestId: Id<"pullRequests">;
+    contributorId: Id<"contributors">;
+    repoId: Id<"repos">;
+  }> => {
     const result = await ctx.runMutation(
       internal.github.syncPullRequestFromGithub,
       args

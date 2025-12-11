@@ -1,7 +1,10 @@
 import { internalMutation, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
-const syncPullRequestArgs = {
+// Shared validator for syncing a GitHub pull request into Convex.
+// Re-use this for both the internal mutation (used by the Agent tool)
+// and for public mutations/actions so they all accept the same shape.
+export const syncPullRequestArgs = {
   repo: v.object({
     githubRepoId: v.string(),
     owner: v.string(),
@@ -35,7 +38,7 @@ const syncPullRequestArgs = {
   syncedAt: v.number(),
 } as const;
 
-type SyncPullRequestArgs = {
+export type SyncPullRequestArgs = {
   repo: {
     githubRepoId: string;
     owner: string;
