@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type ChangeEvent } from "react";
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
@@ -16,11 +16,6 @@ import { Mic, Volume2 } from "lucide-react";
 
 type RepoVoiceChatProps = {
   repoId: Id<"repos">;
-};
-
-type ChatTurn = {
-  question: string;
-  answer: string;
 };
 
 export function RepoVoiceChat({ repoId }: RepoVoiceChatProps) {
@@ -44,9 +39,11 @@ export function RepoVoiceChat({ repoId }: RepoVoiceChatProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastQuestion, setLastQuestion] = useState<string | null>(null);
   const [lastAnswer, setLastAnswer] = useState<string | null>(null);
-  const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [threadId, setThreadId] = useState<string | null>(null);
+
+  const askRepoAssistant = useAction(api.repoAssistant.askRepoAssistant);
 
   const isContextReady = Boolean(
     repo && techStack && pullRequests && contributorsDetailed && calls && analysisSessions,
@@ -116,7 +113,7 @@ export function RepoVoiceChat({ repoId }: RepoVoiceChatProps) {
       // 1) Transcribe audio → text via ElevenLabs /api/listen
       const formData = new FormData();
       formData.set("audio", file);
-      formData.set("model", "eleven_multilingual_v2");
+      formData.set("model", "scribe_v1");
 
       const listenRes = await fetch("/api/listen", {
         method: "POST",
@@ -136,65 +133,18 @@ export function RepoVoiceChat({ repoId }: RepoVoiceChatProps) {
 
       setLastQuestion(questionText);
 
-      // 2) Build repo context from Convex data
-      const contextLines: string[] = [];
-      contextLines.push(`Repository: ${repo.repoOwner}/${repo.repoName}`);
-      if (repo.description) {
-        contextLines.push(`Description: ${repo.description}`);
-      }
-      contextLines.push(`Default branch: ${repo.defaultBranch}`);
-      contextLines.push(`GitHub URL: ${repo.url}`);
-
-      if (techStack.length > 0) {
-        const techSummary = techStack
-          .map((item) =>
-            item.version ? `${item.name}@${item.version}` : item.name,
-          )
-          .join(", ");
-        contextLines.push(`Tech stack: ${techSummary}`);
-      }
-
-      contextLines.push(`Total pull requests tracked: ${pullRequests.length}`);
-      contextLines.push(
-        `Contributors tracked: ${contributorsDetailed.length}`,
-      );
-      contextLines.push(`Calls recorded: ${calls.length}`);
-      contextLines.push(`Analyses run: ${analysisSessions.length}`);
-
-      let context = contextLines.join("\n");
-
-      if (turns.length > 0) {
-        const history = turns
-          .map(
-            (t, idx) =>
-              `Turn ${idx + 1} - Q: ${t.question}\nA: ${t.answer}`,
-          )
-          .join("\n\n");
-        context = `${context}\n\nPrevious conversation:\n${history}`;
-      }
-
-      // 3) Ask repo assistant for an answer
-      const qaRes = await fetch("/api/repo-assistant", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          question: questionText,
-          context,
-        }),
+      // 2) Ask Convex repo assistant agent for an answer based on DB tools
+      const result = await askRepoAssistant({
+        repoId,
+        question: questionText,
+        threadId: threadId ?? undefined,
       });
 
-      if (!qaRes.ok) {
-        throw new Error("Failed to get an answer about this repository.");
-      }
-
-      const qaData = (await qaRes.json()) as { answer?: string };
       const answerText =
-        qaData.answer?.trim() ?? "I was unable to generate an answer.";
+        result.text?.trim() ?? "I was unable to generate an answer.";
 
       setLastAnswer(answerText);
-      setTurns((prev) => [...prev, { question: questionText, answer: answerText }]);
+      setThreadId(result.threadId);
 
       // 4) Convert answer to speech and play it
       const speakRes = await fetch("/api/speak", {

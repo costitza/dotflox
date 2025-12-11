@@ -30,7 +30,7 @@ export async function POST(req: Request) {
   const model =
     (typeof incoming.get("model") === "string"
       ? (incoming.get("model") as string)
-      : "") || "eleven_multilingual_v2";
+      : "") || "scribe_v1";
 
   const elevenForm = new FormData();
   elevenForm.set("file", audioFile);
