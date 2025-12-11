@@ -125,6 +125,157 @@ export const upsertRepo = mutation({
   },
 });
 
+export const deleteRepoAndData = mutation({
+  args: { repoId: v.id("repos") },
+  handler: async (ctx, { repoId }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("byExternalAuthId", (q) =>
+        q.eq("externalAuthId", identity.subject)
+      )
+      .unique();
+
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    const repo = await ctx.db.get(repoId);
+    if (!repo) {
+      return;
+    }
+
+    if (repo.ownerUserId !== user._id) {
+      throw new Error("Not authorized to delete this repo");
+    }
+
+    // Delete analysis sessions and their PR links
+    const sessions = await ctx.db
+      .query("analysisSessions")
+      .withIndex("byRepo", (q) => q.eq("repoId", repoId))
+      .collect();
+    for (const session of sessions) {
+      const sessionPRs = await ctx.db
+        .query("analysisSessionPRs")
+        .withIndex("byAnalysisSession", (q) =>
+          q.eq("analysisSessionId", session._id)
+        )
+        .collect();
+      for (const spr of sessionPRs) {
+        await ctx.db.delete(spr._id);
+      }
+      await ctx.db.delete(session._id);
+    }
+
+    // Delete PR analyses and their contributor links
+    const prAnalysesForRepo = await ctx.db
+      .query("prAnalyses")
+      .withIndex("byRepo", (q) => q.eq("repoId", repoId))
+      .collect();
+    for (const analysis of prAnalysesForRepo) {
+      const links = await ctx.db
+        .query("prAnalysisContributors")
+        .withIndex("byPrAnalysis", (q) =>
+          q.eq("prAnalysisId", analysis._id)
+        )
+        .collect();
+      for (const link of links) {
+        await ctx.db.delete(link._id);
+      }
+      await ctx.db.delete(analysis._id);
+    }
+
+    // Delete history checkpoints
+    const history = await ctx.db
+      .query("historyCheckpoints")
+      .withIndex("byRepoAndEventAt", (q) => q.eq("repoId", repoId))
+      .collect();
+    for (const h of history) {
+      await ctx.db.delete(h._id);
+    }
+
+    // Delete calls and their action items
+    const calls = await ctx.db
+      .query("calls")
+      .withIndex("byRepo", (q) => q.eq("repoId", repoId))
+      .collect();
+    for (const call of calls) {
+      const items = await ctx.db
+        .query("callActionItems")
+        .withIndex("byCall", (q) => q.eq("callId", call._id))
+        .collect();
+      for (const item of items) {
+        await ctx.db.delete(item._id);
+      }
+      await ctx.db.delete(call._id);
+    }
+
+    // Delete call action items that may reference this repo via PRs or contributors
+    const prsForRepo = await ctx.db
+      .query("pullRequests")
+      .withIndex("byRepo", (q) => q.eq("repoId", repoId))
+      .collect();
+    for (const pr of prsForRepo) {
+      const itemsByPr = await ctx.db
+        .query("callActionItems")
+        .withIndex("byPullRequest", (q) =>
+          q.eq("pullRequestId", pr._id)
+        )
+        .collect();
+      for (const item of itemsByPr) {
+        await ctx.db.delete(item._id);
+      }
+
+      // Delete analysisSessionPRs referencing this PR
+      const sessionPRsByPr = await ctx.db
+        .query("analysisSessionPRs")
+        .withIndex("byPullRequest", (q) =>
+          q.eq("pullRequestId", pr._id)
+        )
+        .collect();
+      for (const spr of sessionPRsByPr) {
+        await ctx.db.delete(spr._id);
+      }
+
+      await ctx.db.delete(pr._id);
+    }
+
+    // Delete repo contributor links and any action items tied to them
+    const repoContributors = await ctx.db
+      .query("repoContributors")
+      .withIndex("byRepo", (q) => q.eq("repoId", repoId))
+      .collect();
+    for (const rc of repoContributors) {
+      const itemsByRc = await ctx.db
+        .query("callActionItems")
+        .withIndex("byRepoContributor", (q) =>
+          q.eq("repoContributorId", rc._id)
+        )
+        .collect();
+      for (const item of itemsByRc) {
+        await ctx.db.delete(item._id);
+      }
+      await ctx.db.delete(rc._id);
+    }
+
+    // Delete tech stack items
+    const techItems = await ctx.db
+      .query("techStackItems")
+      .withIndex("byRepo", (q) => q.eq("repoId", repoId))
+      .collect();
+    for (const item of techItems) {
+      await ctx.db.delete(item._id);
+    }
+
+    // Finally delete the repo itself
+    await ctx.db.delete(repoId);
+  },
+});
+
 /**
  * CONTRIBUTORS & REPO CONTRIBUTORS
  */

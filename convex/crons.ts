@@ -5,7 +5,7 @@ const crons = cronJobs();
 
 crons.interval(
   "sync github pull requests for all repos",
-  { minutes: 1 },
+  { seconds: 5 },
   internal.github.scheduleGithubSyncAllRepos,
   {}
 );
