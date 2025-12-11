@@ -2,7 +2,7 @@ import { action, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { createThread, listUIMessages } from "@convex-dev/agent";
-import { components } from "./_generated/api";
+import { api, components } from "./_generated/api";
 import { prAnalyzerAgent } from "./agents/PRAnalyzer";
 import { syncPullRequestArgs, type SyncPullRequestArgs } from "./github";
 
@@ -174,6 +174,169 @@ export const testPrAnalyzerAgent = action({
     );
 
     return { threadId, text: result.text };
+  },
+});
+
+// Repo-level analysis workflow:
+// - Creates an analysis session for the repo
+// - Finds PRs that need (re-)analysis
+// - For each, runs the PR Analyzer Agent and stores results in prAnalyses
+export const runRepoAnalysisWorkflow = action({
+  args: { repoId: v.id("repos") },
+  handler: async (ctx, { repoId }) => {
+    const repo = await ctx.runQuery(api.app.getRepo, { repoId });
+    if (!repo) return;
+
+    // Avoid overlapping analysis sessions for the same repo.
+    const existingSessions = await ctx.runQuery(
+      api.app.listAnalysisSessionsForRepo,
+      { repoId }
+    );
+    const hasRunning = existingSessions.some(
+      (s) => s.status === "running"
+    );
+    if (hasRunning) return;
+
+    const prs = await ctx.runQuery(api.app.listPullRequestsForRepo, {
+      repoId,
+    });
+    const analyses = await ctx.runQuery(api.app.listPrAnalysesForRepo, {
+      repoId,
+    });
+
+    // Map latest analysis per PR
+    const latestByPrId = new Map<
+      string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      any
+    >();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    analyses.forEach((a: any) => {
+      const key = a.pullRequestId;
+      const current = latestByPrId.get(key);
+      if (
+        !current ||
+        (a.updatedAt ?? a.createdAt) > (current.updatedAt ?? current.createdAt)
+      ) {
+        latestByPrId.set(key, a);
+      }
+    });
+
+    // PRs needing analysis: no analysis yet, or not completed, or older than lastSyncedAt.
+    const candidates = prs.filter((pr: any) => {
+      const analysis = latestByPrId.get(pr._id);
+      if (!analysis) return true;
+      if (analysis.status !== "completed") return true;
+      if ((analysis.updatedAt ?? analysis.createdAt) < pr.lastSyncedAt) {
+        return true;
+      }
+      return false;
+    });
+
+    if (candidates.length === 0) {
+      return;
+    }
+
+    const sessionId = await ctx.runMutation(api.app.createAnalysisSession, {
+      repoId,
+      userId: repo.ownerUserId,
+      sessionType: "pr_auto",
+      status: "running",
+      config: undefined,
+      summary: `Automatic PR analysis for ${repo.repoName}`,
+    });
+
+    // Limit to a reasonable number per run for hackathon performance.
+    const toAnalyze = candidates.slice(0, 10);
+
+    for (const pr of toAnalyze) {
+      const prAnalysisId = await ctx.runMutation(api.app.createPrAnalysis, {
+        repoId,
+        pullRequestId: pr._id,
+        status: "running",
+        summary: undefined,
+        filesChanged: undefined,
+        impactedPaths: undefined,
+        riskLevel: undefined,
+        rawMetadata: undefined,
+      });
+
+      await ctx.runMutation(api.app.addAnalysisSessionPR, {
+        analysisSessionId: sessionId,
+        pullRequestId: pr._id,
+        status: "running",
+      });
+
+      const prompt = [
+        "You are an expert GitHub pull request analysis agent.",
+        "You will be given structured data for a single PR from a codebase.",
+        "Respond with a concise JSON object describing the analysis.",
+        "",
+        "Input shape:",
+        "{",
+        '  "title": string,',
+        '  "body": string | null,',
+        '  "repoName": string,',
+        '  "repoOwner": string',
+        "}",
+        "",
+        "Output JSON shape (no extra keys):",
+        "{",
+        '  "summary": string,',
+        '  "riskLevel": "low" | "medium" | "high" | "critical",',
+        '  "filesChanged": string[],',
+        '  "impactedPaths": string[]',
+        "}",
+        "",
+        "Here is the PR JSON:",
+        JSON.stringify({
+          title: pr.title,
+          body: pr.body ?? null,
+          repoName: repo.repoName,
+          repoOwner: repo.repoOwner,
+        }),
+      ].join("\n");
+
+      const result = await prAnalyzerAgent.generateText(
+        ctx,
+        // Use the repo owner as the Agent "userId" to satisfy context requirements
+        // and override tools with none; we just want pure analysis.
+        { userId: repo.ownerUserId.id ?? String(repo.ownerUserId), tools: {} },
+        { prompt }
+      );
+
+      let parsed:
+        | {
+            summary: string;
+            riskLevel: "low" | "medium" | "high" | "critical";
+            filesChanged: string[];
+            impactedPaths: string[];
+          }
+        | null = null;
+
+      try {
+        parsed = JSON.parse(result.text);
+      } catch {
+        parsed = null;
+      }
+
+      await ctx.runMutation(api.app.updatePrAnalysisDetails, {
+        prAnalysisId,
+        status: "completed",
+        summary: parsed?.summary ?? result.text,
+        filesChanged: parsed?.filesChanged ?? [],
+        impactedPaths: parsed?.impactedPaths ?? [],
+        riskLevel: parsed?.riskLevel ?? "medium",
+        rawMetadata: parsed,
+      });
+    }
+
+    await ctx.runMutation(api.app.updateAnalysisSessionStatus, {
+      analysisSessionId: sessionId,
+      status: "completed",
+      startedAt: Date.now(),
+      completedAt: Date.now(),
+    });
   },
 });
 

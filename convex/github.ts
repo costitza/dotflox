@@ -83,9 +83,8 @@ async function syncPullRequestCore(ctx: any, args: SyncPullRequestArgs) {
     .unique();
 
   if (!repoRow) {
-    throw new Error(
-      `No repo found for githubRepoId=${repo.githubRepoId}. Create the repo row before syncing PRs.`
-    );
+    // Repo was deleted or not yet created; skip syncing for this PR.
+    return;
   }
 
   let contributor = await ctx.db
@@ -226,6 +225,16 @@ export const syncRepoPullRequestsFromGithub = action({
       return;
     }
 
+    // Snapshot of existing PR numbers in Convex so we can detect
+    // whether the open-PR set has changed since the last sync.
+    const existingPrs = await ctx.runQuery(api.app.listPullRequestsForRepo, {
+      repoId,
+    });
+    const existingNumbers = new Set(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (existingPrs as any[]).map((pr: any) => pr.prNumber as number)
+    );
+
     const github = createGithubClient(token);
 
     const allPullRequests = await github.listPullRequests(
@@ -294,6 +303,40 @@ export const syncRepoPullRequestsFromGithub = action({
       internal.github.pruneClosedPullRequestsForRepo,
       { repoId, openPrNumbers }
     );
+
+    // Determine if the open-PR set has changed compared to what we had
+    // stored in Convex. Only if it has changed do we kick off a new
+    // analysis workflow.
+    const openSet = new Set(openPrNumbers);
+    let changed = false;
+
+    if (existingNumbers.size !== openSet.size) {
+      changed = true;
+    } else {
+      for (const num of openSet) {
+        if (!existingNumbers.has(num)) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) {
+        for (const num of existingNumbers) {
+          if (!openSet.has(num)) {
+            changed = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (changed) {
+      // Kick off a repo-level analysis workflow for updated PRs.
+      await ctx.scheduler.runAfter(
+        0,
+        api.prAgent.runRepoAnalysisWorkflow,
+        { repoId }
+      );
+    }
   },
 });
 

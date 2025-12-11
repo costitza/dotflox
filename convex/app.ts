@@ -538,6 +538,37 @@ export const createPrAnalysis = mutation({
   },
 });
 
+export const updatePrAnalysisDetails = mutation({
+  args: {
+    prAnalysisId: v.id("prAnalyses"),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed")
+    ),
+    summary: v.optional(v.string()),
+    filesChanged: v.optional(v.array(v.string())),
+    impactedPaths: v.optional(v.array(v.string())),
+    riskLevel: v.optional(
+      v.union(
+        v.literal("low"),
+        v.literal("medium"),
+        v.literal("high"),
+        v.literal("critical")
+      )
+    ),
+    rawMetadata: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    const { prAnalysisId, ...patch } = args;
+    await ctx.db.patch(prAnalysisId, {
+      ...patch,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const updatePrAnalysisStatus = mutation({
   args: {
     prAnalysisId: v.id("prAnalyses"),
@@ -622,8 +653,6 @@ export const createAnalysisSession = mutation({
     const now = Date.now();
     return ctx.db.insert("analysisSessions", {
       ...args,
-      startedAt: null,
-      completedAt: null,
       createdAt: now,
       updatedAt: now,
     });

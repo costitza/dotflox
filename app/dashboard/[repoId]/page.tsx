@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
+import { useMemo, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
@@ -63,6 +64,23 @@ export default function RepoDashboardPage() {
     api.app.listCallsForRepo,
     repoId ? { repoId } : ("skip" as any)
   );
+
+  const [selectedPrId, setSelectedPrId] = useState<string | null>(null);
+
+  const latestAnalysisByPrId = useMemo(() => {
+    const map = new Map<string, any>();
+    (prAnalyses ?? []).forEach((a: any) => {
+      const key = a.pullRequestId;
+      const current = map.get(key);
+      if (
+        !current ||
+        (a.updatedAt ?? a.createdAt) > (current.updatedAt ?? current.createdAt)
+      ) {
+        map.set(key, a);
+      }
+    });
+    return map;
+  }, [prAnalyses]);
 
   if (!repo) {
     return (
@@ -334,36 +352,46 @@ export default function RepoDashboardPage() {
                     </p>
                   )}
                   {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                  {prs.map((pr: any) => (
-                    <div
-                      key={pr._id}
-                      className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] items-center py-2 text-[12px]"
-                    >
-                      <span className="font-medium text-slate-900">
-                        #{pr.prNumber}
-                      </span>
-                      <span className="truncate text-slate-800">
-                        {pr.title}
-                      </span>
-                      <span>
-                        <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                            pr.status === "open"
-                              ? "bg-emerald-50 text-emerald-700"
-                              : pr.status === "merged"
-                                ? "bg-violet-50 text-violet-700"
-                                : "bg-slate-100 text-slate-700"
-                          }`}
-                        >
-                          {pr.status}
+                  {prs.map((pr: any) => {
+                    const statusLabel = getPrAnalysisStatus(pr._id);
+                    const hasCompletedAnalysis =
+                      latestAnalysisByPrId.get(pr._id)?.status === "completed";
+                    return (
+                      <button
+                        key={pr._id}
+                        type="button"
+                        disabled={!hasCompletedAnalysis}
+                        onClick={() =>
+                          hasCompletedAnalysis && setSelectedPrId(pr._id)
+                        }
+                        className="grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] items-center py-2 text-left text-[12px] hover:bg-slate-50/80 disabled:cursor-default disabled:bg-transparent"
+                      >
+                        <span className="font-medium text-slate-900">
+                          #{pr.prNumber}
                         </span>
-                      </span>
-                      <span className="text-slate-600">—</span>
-                      <span className="text-slate-700">
-                        {getPrAnalysisStatus(pr._id)}
-                      </span>
-                    </div>
-                  ))}
+                        <span className="truncate text-slate-800">
+                          {pr.title}
+                        </span>
+                        <span>
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                              pr.status === "open"
+                                ? "bg-emerald-50 text-emerald-700"
+                                : pr.status === "merged"
+                                  ? "bg-violet-50 text-violet-700"
+                                  : "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {pr.status}
+                          </span>
+                        </span>
+                        <span className="text-slate-600">—</span>
+                        <span className="text-slate-700">
+                          {statusLabel}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
@@ -539,6 +567,100 @@ export default function RepoDashboardPage() {
           <RepoVoiceChat repoId={repoId} />
         </section>
       </main>
+      {selectedPrId && latestAnalysisByPrId.get(selectedPrId) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl">
+            {(() => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const pr = prs.find((p: any) => p._id === selectedPrId);
+              const analysis = latestAnalysisByPrId.get(selectedPrId);
+              if (!pr || !analysis) return null;
+
+              return (
+                <>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                        PR analysis
+                      </p>
+                      <h2 className="text-sm font-semibold text-slate-900">
+                        #{pr.prNumber} · {pr.title}
+                      </h2>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {analysis.riskLevel && (
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                            analysis.riskLevel === "low"
+                              ? "bg-emerald-50 text-emerald-700"
+                              : analysis.riskLevel === "medium"
+                                ? "bg-amber-50 text-amber-700"
+                                : analysis.riskLevel === "high"
+                                  ? "bg-orange-50 text-orange-700"
+                                  : "bg-rose-50 text-rose-700"
+                          }`}
+                        >
+                          {analysis.riskLevel} risk
+                        </span>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 rounded-full px-3 text-[11px]"
+                        type="button"
+                        onClick={() => setSelectedPrId(null)}
+                      >
+                        Close
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 text-xs text-slate-700">
+                    {analysis.summary && (
+                      <div>
+                        <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                          Summary
+                        </p>
+                        <p className="whitespace-pre-line text-xs">
+                          {analysis.summary}
+                        </p>
+                      </div>
+                    )}
+
+                    {Array.isArray(analysis.filesChanged) &&
+                      analysis.filesChanged.length > 0 && (
+                        <div>
+                          <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                            Files changed
+                          </p>
+                          <ul className="list-disc space-y-0.5 pl-4">
+                            {analysis.filesChanged.map((f: string) => (
+                              <li key={f}>{f}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                    {Array.isArray(analysis.impactedPaths) &&
+                      analysis.impactedPaths.length > 0 && (
+                        <div>
+                          <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                            Impacted areas
+                          </p>
+                          <ul className="list-disc space-y-0.5 pl-4">
+                            {analysis.impactedPaths.map((p: string) => (
+                              <li key={p}>{p}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
