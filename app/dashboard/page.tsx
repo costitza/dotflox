@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/card";
 import { api } from "@/convex/_generated/api";
 import { AddRepoForm } from "@/components/dashboard/add-repo-form";
-import { Activity, GitBranch, GitPullRequest, Star } from "lucide-react";
+import { GitBranch, GitPullRequest } from "lucide-react";
 
 export default function DashboardPage() {
   const { user } = useUser();
@@ -22,7 +22,6 @@ export default function DashboardPage() {
 
   const totalRepos = repos.length;
   const totalOpenPrs = 0;
-  const avgHealthScore = 0;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -45,9 +44,9 @@ export default function DashboardPage() {
         </SignedOut>
 
         <SignedIn>
-          <div className="space-y-8">
+          <div className="space-y-10">
             {/* Header */}
-            <section className="space-y-2">
+            <section className="space-y-2 text-center sm:text-left">
               <p className="text-sm font-medium text-slate-500">Dashboard</p>
               <h1 className="text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
                 Good to see you,{" "}
@@ -56,14 +55,14 @@ export default function DashboardPage() {
                 </span>
                 .
               </h1>
-              <p className="max-w-2xl text-sm text-slate-600 sm:text-base">
+              <p className="mx-auto max-w-2xl text-sm text-slate-600 sm:text-base">
                 Here&apos;s a snapshot of the repositories you&apos;ve synced
                 with .flux and how they&apos;re performing.
               </p>
             </section>
 
             {/* Stats row */}
-            <section className="grid gap-4 md:grid-cols-3">
+            <section className="mx-auto grid max-w-4xl gap-4 md:grid-cols-3">
               <Card className="border-slate-200 bg-white shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between pb-3">
                   <div>
@@ -91,9 +90,9 @@ export default function DashboardPage() {
                     <CardTitle className="text-sm font-medium text-slate-700">
                       Open PRs
                     </CardTitle>
-                      <CardDescription className="text-xs text-slate-500">
-                        Coming soon: live PR stats from GitHub.
-                      </CardDescription>
+                    <CardDescription className="text-xs text-slate-500">
+                      Coming soon: live PR stats from GitHub.
+                    </CardDescription>
                   </div>
                   <div className="flex size-9 items-center justify-center rounded-full bg-blue-50 text-[#2563eb]">
                     <GitPullRequest className="size-4" />
@@ -105,32 +104,10 @@ export default function DashboardPage() {
                   </p>
                 </CardContent>
               </Card>
-
-              <Card className="border-slate-200 bg-white shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-3">
-                  <div>
-                    <CardTitle className="text-sm font-medium text-slate-700">
-                      Avg. health score
-                    </CardTitle>
-                    <CardDescription className="text-xs text-slate-500">
-                      Coming soon: health scores from AI analysis.
-                    </CardDescription>
-                  </div>
-                  <div className="flex size-9 items-center justify-center rounded-full bg-blue-50 text-[#2563eb]">
-                    <Activity className="size-4" />
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-semibold text-slate-900">
-                    {avgHealthScore}
-                    <span className="ml-1 text-sm text-slate-500">/ 100</span>
-                  </p>
-                </CardContent>
-              </Card>
             </section>
 
-            {/* Repositories table + side panel */}
-            <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)]">
+            {/* Repositories table */}
+            <section className="mx-auto max-w-5xl">
               <Card className="border-slate-200 bg-white shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between gap-3 pb-4">
                   <div>
@@ -185,44 +162,6 @@ export default function DashboardPage() {
                         </div>
                       ))}
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-slate-200 bg-white shadow-sm">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold text-slate-900">
-                    Next steps
-                  </CardTitle>
-                  <CardDescription className="text-xs text-slate-500">
-                    Make the most of .flux by keeping your repos and meetings in
-                    sync.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm text-slate-700">
-                  <div className="flex items-start gap-2 rounded-xl bg-slate-50 p-3">
-                    <div className="mt-0.5 flex size-7 items-center justify-center rounded-full bg-blue-50 text-[#2563eb]">
-                      <Star className="size-4" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-slate-900">
-                        Run a fresh repo analysis
-                      </p>
-                      <p className="text-xs text-slate-600">
-                        Kick off a new full-repo audit to refresh your health
-                        scores and highlight technical debt.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
-                    <p className="font-medium text-slate-900">
-                      Tip: connect your meetings
-                    </p>
-                    <p className="mt-1">
-                      Invite the .flux bot to your next architecture sync so PR
-                      reviews and audio summaries stay aligned.
-                    </p>
                   </div>
                 </CardContent>
               </Card>
