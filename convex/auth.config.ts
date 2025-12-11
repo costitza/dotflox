@@ -1,18 +1,21 @@
 import type { AuthConfig } from "convex/server";
 
-const authConfig = {
+// Convex reads this file on the server to know which auth providers
+// can issue tokens. For Clerk, the domain must match the ISSUER of
+// the Clerk JWT template you created (usually named "convex").
+//
+// In Clerk dashboard:
+//  - Create a JWT template called "convex"
+//  - Copy the "Issuer" URL and set it as CLERK_JWT_ISSUER_DOMAIN
+//  - Ensure this env var is available to the Convex dev/prod process
+
+export default {
   providers: [
     {
-      // Issuer domain for your Clerk JWT template.
-      // Commonly provided via an environment variable like CLERK_JWT_ISSUER_DOMAIN
-      // or CLERK_FRONTEND_API_URL depending on your setup.
-      domain: process.env.CLERK_FRONTEND_API_URL!,
-      // This should match the name of your Clerk JWT template (usually "convex").
+      domain: process.env.CLERK_JWT_ISSUER_DOMAIN!,
       applicationID: "convex",
     },
   ],
 } satisfies AuthConfig;
-
-export default authConfig;
 
 
