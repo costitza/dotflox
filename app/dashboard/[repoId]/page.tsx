@@ -13,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { RepoVoiceChat } from "@/components/repo/repo-voice-chat";
 import {
   Activity,
   ArrowLeft,
@@ -511,8 +512,12 @@ export default function RepoDashboardPage() {
             </CardContent>
           </Card>
         </section>
+
+        {/* Voice chatbot section */}
+        <section>
+          <RepoVoiceChat repoId={repoId} />
+        </section>
       </main>
     </div>
   );
 }
-
