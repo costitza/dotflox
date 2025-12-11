@@ -91,6 +91,10 @@ export default defineSchema({
       v.literal("merged")
     ),
 
+    // Optional Convex Agent thread id associated with PRAnalyzerAgent
+    // for this pull request (stored in the Agent component's tables).
+    prAnalyzerThreadId: v.optional(v.string()),
+
     createdAt: v.number(),
     mergedAt: v.optional(v.number()),
     closedAt: v.optional(v.number()),
