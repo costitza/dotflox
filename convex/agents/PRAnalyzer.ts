@@ -1,7 +1,7 @@
 import { Agent, createTool } from "@convex-dev/agent";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { api, components, internal } from "../_generated/api";
+import { components, internal } from "../_generated/api";
 
 /**
  * Tool: syncGithubPullRequest
